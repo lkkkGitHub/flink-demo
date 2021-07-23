@@ -2,10 +2,16 @@ package lk;
 
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.flink.api.common.functions.AggregateFunction;
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.TimeCharacteristic;
+import org.apache.flink.streaming.api.checkpoint.ListCheckpointed;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
@@ -15,7 +21,9 @@ import org.apache.flink.streaming.connectors.redis.common.config.FlinkJedisPoolC
 import org.apache.flink.util.Collector;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -60,7 +68,57 @@ public class WindowCount {
         stringDataSource.flatMap((String value, Collector<Tuple2<String, Integer>> out) -> Arrays.stream(value.split("\\|")).forEach(s -> out.collect(new Tuple2<>(s, 1))))
                 .returns(Types.TUPLE(Types.STRING, Types.INT)).keyBy(0).countWindow(10);
 
+        // 算子状态
+        stringDataSource.map(new TestMapFunction()).print();
+
+        // 键控状态
+        stringDataSource.keyBy(0).map(new TestRichMapFunction()).print();
+
+
     }
+
+    static class TestRichMapFunction extends RichMapFunction<String, Integer> {
+
+        private ValueState<Integer> valueState;
+
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            valueState = getRuntimeContext().getState(new ValueStateDescriptor<>("key-count", Integer.class));
+        }
+
+        @Override
+        public Integer map(String value) throws Exception {
+            Integer count = Optional.ofNullable(valueState.value()).orElse(0);
+            valueState.update(++count);
+            return count;
+        }
+    }
+
+
+
+        // 算子状态，并结合checkpoint一起使用
+
+        static class TestMapFunction implements MapFunction<String, Integer>, ListCheckpointed<Integer> {
+        private Integer count;
+
+        @Override
+        public Integer map(String value) throws Exception {
+            return ++count;
+        }
+
+        // 状态持久化
+        @Override
+        public List<Integer> snapshotState(long checkpointId, long timestamp) throws Exception {
+            return Collections.singletonList(count);
+        }
+
+        // 状态恢复
+        @Override
+        public void restoreState(List<Integer> state) throws Exception {
+            state.forEach(s -> count += s);
+        }
+    }
+
 
     // 增量聚合
     static class TestAggregateFunction implements AggregateFunction<Tuple2<String, Integer>, Integer, Integer> {
