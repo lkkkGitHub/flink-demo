@@ -1,4 +1,4 @@
-package lk.pojo;
+package flink.pojo;
 
 /**
  * @author lk

@@ -1,4 +1,4 @@
-package lk;
+package flink;
 
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.flink.api.common.functions.AggregateFunction;
